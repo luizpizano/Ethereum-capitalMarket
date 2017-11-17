@@ -1,0 +1,76 @@
+commandPrefix="geth --identity private --datadir /home/luiz/.ethereum/geth/privateNet --port 30303 --networkid 21"
+
+#second private net
+commandPrefix1="geth --identity private --datadir /home/luiz/.ethereum/geth/privateNet1 --port 30304 --networkid 21"
+
+#second private net
+commandPrefixOld="geth --identity private --rpc --rpcport 8081 --rpccorsdomain '*' --datadir /home/luiz/.ethereum/geth/privateNet1 --port 30304 --networkid 21"
+
+
+case "$1" in
+        console)
+            command="$commandPrefix console"
+            echo $command
+            eval '$command'
+            ;;
+        
+        bootode)
+	    command="geth --datadir /home/luiz/.ethereum/geth/privateNet --nodekey=boot.key bootnode"
+	    ;;
+        attach)
+            command="$commandPrefix attach ipc:/home/luiz/.ethereum/geth/privateNet/geth.ipc"
+            echo $command
+            eval '$command'
+            ;;
+
+	    mist)
+            command="ethereumwallet --rpc /home/luiz/.ethereum/geth/privateNet/geth.ipc"
+            echo $command
+            eval '$command'
+            ;;
+
+        init)
+            command="$commandPrefix init /home/luiz/.ethereum/geth/privateNet/genesis.json"
+            echo $command
+            `$command`
+            ;;
+         
+        consoleVerbose)
+            command="$commandPrefix --verbosity 6 console"
+            echo verbose console
+            `$command`
+            ;;
+        console1)
+            command="$commandPrefix1 console"
+            echo $command
+            eval '$command'
+            ;;
+        
+        bootnode1)
+	    command="geth --datadir /home/luiz/.ethereum/geth/privateNet1 --nodekey=boot.key bootnode"
+	    ;;
+        attach1)
+            command="$commandPrefix1 attach ipc:/home/luiz/.ethereum/geth/privateNet1/geth.ipc"
+            echo $command
+            eval '$command'
+            ;;
+
+	    mist1)
+            command="ethereumwallet --rpc /home/luiz/.ethereum/geth/privateNet1/geth.ipc"
+            echo $command
+            eval '$command'
+            ;;
+
+        init1)
+            command="$commandPrefix1 init /home/luiz/.ethereum/geth/privateNet1/genesis.json"
+            echo $command
+            `$command`
+            ;;
+         
+        consoleVerbose1)
+            command="$commandPrefix1 --verbosity 6 console"
+            echo verbose console
+            `$command`
+            ;;
+esac
+

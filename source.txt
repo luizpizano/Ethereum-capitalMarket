@@ -1,0 +1,300 @@
+pragma solidity ^0.4.0;
+
+contract owned {
+    address public owner;
+
+    function owned() {
+        owner = msg.sender;
+    }
+
+    modifier onlyOwner {
+        require(msg.sender == owner);
+        _;
+    }
+
+    function transferOwnership(address newOwner) onlyOwner {
+        owner = newOwner;
+    }
+}
+
+contract token {
+    /* Public variables of the token */
+    string public standard = 'Token 0.1';
+    string public name;
+    string public symbol;
+    uint8 public decimals;
+    uint256 public totalSupply;
+
+    /* This creates an array with all balances */
+    mapping (address => uint256) public balanceOf;
+    mapping (address => mapping (address => uint256)) public allowance;
+
+    /* This generates a public event on the blockchain that will notify clients */
+    event Transfer(address indexed from, address indexed to, uint256 value);
+
+    /* Initializes contract with initial supply tokens to the creator of the contract */
+    function token(
+        uint256 initialSupply,
+        string tokenName,
+        uint8 decimalUnits,
+        string tokenSymbol
+        ) {
+        balanceOf[msg.sender] = initialSupply;  // Give the creator all initial tokens
+        totalSupply = initialSupply;    // Update total supply
+        name = tokenName;   // Set the name for display purposes
+        symbol = tokenSymbol;   // Set the symbol for display purposes
+        decimals = decimalUnits;    // Amount of decimals for display purposes
+    }
+
+    /* Send coins */
+    function transfer(address _to, uint256 _value) {
+        require(balanceOf[msg.sender] >= _value);   // Check if the sender has enough
+        require(balanceOf[_to] + _value >= balanceOf[_to]); // Check for overflows
+        balanceOf[msg.sender] -= _value;    // Subtract from the sender
+        balanceOf[_to] += _value;   // Add the same to the recipient
+        Transfer(msg.sender, _to, _value);  // Notify anyone listening that this transfer took place
+    }
+
+    /* Allow another contract to spend some tokens in your behalf
+    */
+    function approve(address _spender, uint256 _value)
+        returns (bool success) {
+        allowance[msg.sender][_spender] = _value;
+        return true;
+    }
+
+    /* A contract attempts to get the coins */
+    function transferFrom(address _from, address _to, uint256 _value) returns (bool success) {
+        require(balanceOf[_from] >= _value);    // Check if the sender has enough
+        require(balanceOf[_to] + _value < balanceOf[_to]);  // Check for overflows
+        require(_value <= allowance[_from][msg.sender]);   // Check allowance
+        balanceOf[_from] -= _value; // Subtract from the sender
+        balanceOf[_to] += _value;   // Add the same to the recipient
+        allowance[_from][msg.sender] -= _value;
+        Transfer(_from, _to, _value);
+        return true;
+    }
+
+    /* This unnamed function is called whenever someone tries to send ether to it */
+    function () {
+        require(false); // Prevents accidental sending of ether
+    }
+}
+
+contract Currency is owned, token {
+
+    /*
+    uint256 public sellPrice;
+    uint256 public buyPrice;
+    */
+
+    mapping (address => bool) public frozenAccount;
+
+    /* This generates a public event on the blockchain that will notify clients */
+    event FrozenFunds(address target, bool frozen);
+
+    function getBalance(address _address) public returns (uint256) { return balanceOf[_address]; }
+     
+    /* Initializes contract with initial supply tokens to the creator of the contract */
+    function Currency(
+        uint256 initialSupply,
+        string tokenName,
+        uint8 decimalUnits,
+        string tokenSymbol
+    ) token (initialSupply, tokenName, decimalUnits, tokenSymbol) {} 
+
+    /* Send coins */
+    function transfer(address _to, uint256 _value) {
+        require(balanceOf[msg.sender] >= _value);   // Check if the sender has enough
+        require(balanceOf[_to] + _value >= balanceOf[_to]); // Check for overflows
+        require(!frozenAccount[msg.sender]);    // Check if frozen
+        balanceOf[msg.sender] -= _value;    // Subtract from the sender
+        balanceOf[_to] += _value;   // Add the same to the recipient
+        Transfer(msg.sender, _to, _value);  // Notify anyone listening that this transfer took place
+    }
+
+    /* A contract attempts to get the coins */
+    function transferFrom(address _from, address _to, uint256 _value) returns (bool success) {
+        require(!frozenAccount[_from]); // Check if frozen
+        require(balanceOf[_from] >= _value);    // Check if the sender has enough
+        require(balanceOf[_to] + _value >= balanceOf[_to]); // Check for overflows
+        require(_value <= allowance[_from][msg.sender]);  // Check allowance
+        balanceOf[_from] -= _value; // Subtract from the sender
+        balanceOf[_to] += _value;   // Add the same to the recipient
+        allowance[_from][msg.sender] -= _value;
+        Transfer(_from, _to, _value);
+        return true;
+    }
+
+    function mintToken(address target, uint256 mintedAmount) onlyOwner {
+        balanceOf[target] += mintedAmount;
+        totalSupply += mintedAmount;
+        Transfer(0, this, mintedAmount);
+        Transfer(this, target, mintedAmount);
+    }
+
+    function freezeAccount(address target, bool freeze) onlyOwner {
+        frozenAccount[target] = freeze;
+        FrozenFunds(target, freeze);
+    }
+}
+
+contract Asset {
+
+    enum OrderType{BUY,SELL}
+
+    struct Order{
+        address solicitant;
+        uint256 quantity;
+        uint256 price;
+        int auxiliaryIndex;
+    }
+    Order[] internal buyList;
+    Order[] internal sellList;
+    Order auxiliary;
+    mapping (address=>uint256) public balanceOf;
+    Currency CurrencyManager;
+    
+    function Asset(uint256 initialSupply, address CurrencyContractAddress){
+        balanceOf[msg.sender]=initialSupply;
+        CurrencyManager = Currency(CurrencyContractAddress);
+    }
+    
+    function insertBuyOrder(uint256 proposedPrice, uint256 quantity) {
+        require(CurrencyManager.getBalance(msg.sender) >= quantity*proposedPrice);
+        insert(Order(msg.sender,quantity,proposedPrice,-int(proposedPrice)), OrderType.BUY);
+        resolveBuyMatches();
+    }
+    
+    function resolveBuyMatches() internal{
+        if(sellList.length>0 && getBiggestBuyOrder().price>=getSmallestSellOrder().price){
+            if(getBiggestBuyOrder().quantity>=getSmallestSellOrder().quantity){    
+                bool CurrencyTransfered = CurrencyManager.transferFrom(getBiggestBuyOrder().solicitant,getSmallestSellOrder().solicitant,getSmallestSellOrder().quantity*getBiggestBuyOrder().price);
+                if (!CurrencyTransfered) return;
+                transferFrom(getSmallestSellOrder().solicitant,getBiggestBuyOrder().solicitant,getSmallestSellOrder().quantity);
+                setBiggestBuyOrderQuantity(getBiggestBuyOrder().quantity-getSmallestSellOrder().quantity);
+                remove(OrderType.SELL);
+                if(getBiggestBuyOrder().quantity==0) remove(OrderType.BUY);
+                else resolveBuyMatches();
+            }
+            else {
+                CurrencyManager.transferFrom(getBiggestBuyOrder().solicitant,getSmallestSellOrder().solicitant,getBiggestBuyOrder().quantity*getBiggestBuyOrder().price);
+                transferFrom(getSmallestSellOrder().solicitant,getBiggestBuyOrder().solicitant,getBiggestBuyOrder().quantity);
+                setSmallestSellOrderQuantity(getSmallestSellOrder().quantity-getBiggestBuyOrder().quantity);
+                remove(OrderType.BUY);
+            }
+        }
+    }
+    
+    function insertSellOrder(uint256 proposedPrice, uint256 quantity) {
+        require(balanceOf[msg.sender] >= quantity);
+        insert(Order(msg.sender,quantity,proposedPrice,int(proposedPrice)), OrderType.SELL);
+        resolveSellMatches();
+    }
+    
+    function resolveSellMatches() internal{
+        if(buyList.length>0 && getBiggestBuyOrder().price>=getSmallestSellOrder().price){
+            if(getBiggestBuyOrder().quantity>=getSmallestSellOrder().quantity){    
+                bool CurrencyTransfered=CurrencyManager.transferFrom(getBiggestBuyOrder().solicitant,getSmallestSellOrder().solicitant,getSmallestSellOrder().quantity*getBiggestBuyOrder().price);
+                if (!CurrencyTransfered) return;
+                transferFrom(getSmallestSellOrder().solicitant,getBiggestBuyOrder().solicitant,getSmallestSellOrder().quantity);
+                uint256 biggestBuyOrderQuantity = getBiggestBuyOrder().quantity;
+                uint256 smallestSellOrderQuantity = getSmallestSellOrder().quantity;
+                setBiggestBuyOrderQuantity(biggestBuyOrderQuantity - smallestSellOrderQuantity);
+                remove(OrderType.SELL);
+                if(getBiggestBuyOrder().quantity==0) remove(OrderType.BUY);
+            }
+            else {
+                CurrencyManager.transferFrom(getBiggestBuyOrder().solicitant,getSmallestSellOrder().solicitant,getBiggestBuyOrder().quantity*getBiggestBuyOrder().price);
+                transferFrom(getSmallestSellOrder().solicitant,getBiggestBuyOrder().solicitant,getBiggestBuyOrder().quantity);
+                setSmallestSellOrderQuantity(getSmallestSellOrder().quantity-getBiggestBuyOrder().quantity);
+                remove(OrderType.BUY);
+                resolveSellMatches();
+            }
+        }
+    }
+    
+    function transfer (address to, uint256 quantity) {
+        address from = msg.sender;
+        require(balanceOf[from] >= quantity);
+        balanceOf[from]-=quantity;
+        balanceOf[to]+=quantity;
+    }
+    
+    function transferFrom (address from, address to, uint256 quantity) internal {
+        require(balanceOf[from] >= quantity);
+        balanceOf[from]-=quantity;
+        balanceOf[to]+=quantity;
+    }
+    
+    function getSmallestSellOrder() internal returns (Order smallestSellOrder){
+        require(sellList.length!=0);
+        smallestSellOrder = sellList[0];
+    }
+    
+    function getBiggestBuyOrder() internal returns (Order biggestBuyOrder){
+        require(buyList.length!=0);
+        biggestBuyOrder = buyList[0];
+    }
+    
+    function setSmallestSellOrderQuantity(uint256 quantity) internal{
+        require(sellList.length!=0);
+        sellList[0].quantity=quantity;
+    }
+    
+    function setBiggestBuyOrderQuantity(uint256 quantity) internal{
+        require(buyList.length!=0);
+        buyList[0].quantity=quantity;
+    }
+    
+    function remove(OrderType orderType) internal
+    {
+        Order[] storage orderList = buyList;
+        if(orderType==OrderType.SELL) orderList = sellList;
+        orderList[0]=orderList[orderList.length-1];
+        orderList.length--;
+        reorderAfterRemove(orderList,0);
+    }
+    
+    function reorderAfterRemove(Order[] orderList,uint256 relocatingNodeIndex) internal
+    {
+        uint256 smallestChildIndex = relocatingNodeIndex*2+1;
+        if(relocatingNodeIndex*2+1>=orderList.length) return;
+        if(relocatingNodeIndex*2+2<orderList.length)
+        {
+            if(orderList[relocatingNodeIndex*2+2].quantity<orderList[relocatingNodeIndex*2+1].quantity) 
+                smallestChildIndex=(relocatingNodeIndex*2+2);
+        }
+        if(orderList[smallestChildIndex].quantity<orderList[relocatingNodeIndex].quantity)
+        {
+            swap(orderList,relocatingNodeIndex,smallestChildIndex);
+            relocatingNodeIndex=smallestChildIndex; 
+            reorderAfterRemove(orderList, relocatingNodeIndex);
+        }
+    }   
+    
+    function insert(Order newOrder, OrderType orderType) internal{
+        Order[] storage orderList = buyList;
+        if(orderType==OrderType.SELL) 
+        {
+            orderList = sellList;
+        }
+        uint256 oldLength = orderList.length;
+        orderList.push(newOrder);
+        reorderAfterInsert(orderList,oldLength/2, oldLength);
+    }
+    
+    function reorderAfterInsert(Order[] orderList, uint256 smallerIndex, uint256 biggerIndex) internal{
+        if(biggerIndex>0 && orderList[smallerIndex].auxiliaryIndex>orderList[biggerIndex].auxiliaryIndex)
+        {    
+            swap(orderList,smallerIndex,biggerIndex);
+            reorderAfterInsert(orderList,smallerIndex/2, smallerIndex);
+        }
+    }
+    
+    function swap(Order[] orderList, uint256 smallerIndex, uint256 biggerIndex) internal{
+        auxiliary = orderList[smallerIndex];
+        orderList[smallerIndex] = orderList[biggerIndex];
+        orderList[biggerIndex] = auxiliary;
+    }   
+}
